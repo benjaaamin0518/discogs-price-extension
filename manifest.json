@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Discogs Price Helper",
+  "version": "0.1.0",
+  "description": "Show Discogs price ranges on Mercari and Yahoo Auctions listings, and keep a watchlist.",
+  "permissions": [
+    "tabs",
+    "storage",
+    "activeTab",
+    "contextMenus",
+    "unlimitedStorage"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Discogs Price"
+  },
+  "background": {
+    "service_worker": "dist/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.mercari.com/*",
+        "*://*.aucfree.com/*",
+        "*://*.auctions.yahoo.co.jp/*",
+        "*://*.yahoo.co.jp/*"
+      ],
+      "js": ["dist/contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["styles/*.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

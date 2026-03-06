@@ -126,18 +126,18 @@ export async function getDiscogsMedian(meta: jsonResponse): Promise<
 
   if (meta.catalog_number) {
     searchParams.catno = meta.catalog_number;
-  }
+  } else {
+    if (meta.artist) {
+      searchParams.artist = meta.artist;
+    }
 
-  if (meta.artist) {
-    searchParams.artist = meta.artist;
-  }
+    if (meta.title) {
+      searchParams.release_title = meta.title;
+    }
 
-  if (meta.title) {
-    searchParams.release_title = meta.title;
-  }
-
-  if (formats[0]) {
-    searchParams.format = formats[0];
+    if (formats[0]) {
+      searchParams.format = formats[0];
+    }
   }
 
   // 1回目検索

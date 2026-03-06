@@ -12,26 +12,26 @@ const CATALOG_REGEXES = [
 ];
 
 chrome.runtime.onMessage.addListener((msg: any, _sender, sendResponse) => {
-  if (msg?.type === "pageData") {
-    handlePage(msg.payload as PagePayload)
-      .then((res) => {
-        // send back to content script
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          const tabId = tabs[0]?.id;
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tabId = tabs[0]?.id;
+    if (msg?.type === "pageData") {
+      handlePage(msg.payload as PagePayload)
+        .then((res) => {
+          // send back to content script
           if (tabId)
             chrome.tabs.sendMessage(tabId, {
               type: "discogsResult",
               data: res,
             });
+          sendResponse({ ok: true });
+        })
+        .catch((err) => {
+          console.error("background handlePage error", err);
+          sendResponse({ ok: false, error: String(err) });
         });
-        sendResponse({ ok: true });
-      })
-      .catch((err) => {
-        console.error("background handlePage error", err);
-        sendResponse({ ok: false, error: String(err) });
-      });
-    return true;
-  }
+      return true;
+    }
+  });
 });
 
 async function handlePage(payload: PagePayload): Promise<any[]> {

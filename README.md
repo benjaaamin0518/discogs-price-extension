@@ -1,51 +1,179 @@
-# Discogs Price Helper (Chrome extension)
+# Discogs Price Helper Extension
 
-このプロジェクトは、メルカリ / ヤフオク 等の出品ページを開いた際に Discogs の情報（検索候補・価格帯）を表示し、ウォッチリストに追加できる Chrome 拡張機能のプロトタイプです。
+<p align="center">
+  <img src="logo.png" height="250px">
+</p>
+Discogsのマーケットプレイス価格（最低価格 / 中央価格 /
+最高価格）を自動取得し、\
+メルカリやオークションサイト閲覧時に参考価格として表示するツールです。
 
-主な機能
+このツールは **Userscript** として動作します。\
+そのためブラウザに「Userscriptマネージャー」を入れることで利用できます。
 
-- ページのタイトル/本文を抽出して Discogs 検索
-- （オプション）Gemini 風の API に本文/タイトルを送って型番等を抽出し Discogs 検索に渡す
-- 検索候補と価格帯（可能な場合）をポップアップ／ページ上に表示
-- ウォッチリストを拡張機能内に保存・表示
+## Demo
 
-セットアップ
+![alt text](demo.gif)
 
-1. 依存インストール
+---
 
-```bash
-cd /path/to/dicogs-extension
-npm install
-```
+# Features
 
-2. 開発 / ビルド
+- メルカリやオークション閲覧時に自動実行
+- 商品タイトルを解析
+- Discogs API から **Release ID** を取得
+- Discogsマーケットページから価格取得
+- 以下の価格を表示
 
-- 開発サーバ (Vite) を使う場合（拡張機能としての実行は別途ビルドしたものを Chrome に読み込む必要があります）:
+項目 説明
 
-```bash
-npm run dev
-```
+---
 
-- 本番ビルド
+Lowest Price 現在出品されている最低価格
+Median Price 中央値
+Highest Price 最高価格
 
-```bash
-npm run build
-```
+---
 
-ビルド結果は `dist/` に出力されます。Chrome 拡張機能管理画面から「パッケージ化されていない拡張機能を読み込む」で `dist/` を読み込んでください。
+# 対応サイト
 
-設定
+Userscriptは以下のようなページ閲覧時に実行されます。
 
-- 拡張機能のオプション画面で `Discogs token`（database API token）と任意で `Gemini-like endpoint` / `Gemini API key` を入力してください。
-- Gemini エンドポイントは、{ title, body } を POST すると { modelNumbers: string[] } のような JSON を返すAPIを想定しています。未設定時は本文からの正規表現抽出を行います。
+- メルカリ
+- ヤフオク
+- その他レコード販売サイト
 
-注意点
+ページタイトルからレコード情報を解析し、Discogs価格を取得します。
 
-- Discogs のマーケットプレイスの価格取得エンドポイントは利用環境や API の仕様に依存します（トークンや権限が必要）。現在の実装はベストエフォートで URL を叩きますが、環境に合わせて調整してください。
-- CORS や API レートに注意してください。必要ならプロキシサーバーを挟んでください。
+---
 
-次の改善案
+# 仕組み
 
-- Discogs のマーケット価格取得を確実にする（API ドキュメントに合わせた実装）
-- より精度の高い本文→識別子抽出（Gemini のプロンプト最適化）
-- 各種 UI 改善（テーブル表示、履歴、通知）
+1.  商品ページを開く
+2.  ページタイトルを取得
+3.  タイトルを整形（表記揺れ調整）
+4.  Discogs APIでRelease ID検索
+5.  マーケットページから価格取得
+
+Discogsマーケットページ
+
+    https://www.discogs.com/sell/release/{releaseId}
+
+---
+
+# Userscript Installation
+
+このツールは **Userscript** として動作します。
+
+Userscriptとは\
+「Webページを自動で改造する小さなプログラム」です。
+
+通常のアプリのようにインストールする必要はありません。
+
+---
+
+# iOS (iPhone / iPad) Safari セットアップ手順
+
+ITに詳しくない方でも出来るように **一つずつ説明します。**
+
+## 1 App Store を開く
+
+iPhoneのホーム画面から
+
+**App Store** を開いてください。
+
+---
+
+## 2 Userscripts アプリをインストール
+
+検索で
+
+    Userscripts
+
+と入力します。
+
+以下のアプリをインストールしてください。
+
+**Userscripts (Safari拡張)**
+
+---
+
+## 3 Safari拡張機能を有効にする
+
+インストール後、以下を行います。
+
+1.  iPhoneの **設定アプリ** を開く\
+2.  **Safari** をタップ\
+3.  **拡張機能** をタップ\
+4.  **Userscripts** をONにする
+
+これでSafariでUserscriptが使えるようになります。
+
+---
+
+## 4 Userscriptsアプリを開く
+
+インストールした
+
+**Userscripts**
+
+アプリを開いてください。
+
+---
+
+## 5 スクリプトを追加
+
+以下のファイルを追加します。
+
+    discogs-price-helper.user.js
+
+追加方法
+
+1.  `discogs-price-helper.user.js`を本リポジトリよりダウンロード
+2.  ダウンロードした`discogs-price-helper.user.js`を「ファイル」アプリ内でコピーする。
+3.  Userscriptsアプリに戻り「Change Userscripts Directory」ボタンを押下
+4.  開かれたフォルダ選択画面内の余白を長押しし、ペーストを押下し`discogs-price-helper.user.js`を貼り付け
+5.  画面右上の「開く」を押下
+6.  完了
+
+---
+
+## 6 Safariでサイトを開く
+
+Safariで
+
+- メルカリ
+- ヤフオク
+
+などのページを開きます。
+
+レコード商品ページを開くと\
+自動的に **Discogsの価格情報が表示**されます。
+
+---
+
+# 動作例
+
+例
+
+    商品ページ
+    ↓
+    タイトル解析
+    ↓
+    Discogs検索
+    ↓
+    Market価格取得
+    ↓
+    最低 / 中央 / 最高価格表示
+
+---
+
+# Known Limitations
+
+- DiscogsのHTML変更で動作しなくなる可能性があります
+- タイトルが特殊な場合、正しく検索できないことがあります
+
+---
+
+# Disclaimer
+
+このツールは **Discogs公式とは無関係の非公式ツール**です。

@@ -55,7 +55,7 @@
   // 状態管理
   // =============================
   let lastUrl = location.href;
-  let lastTitle = document.querySelector('h1')?.innerText || '';
+  let lastTitle = document.querySelector("h1")?.innerText || "";
   let alreadyProcessed = false;
 
   // =============================
@@ -70,10 +70,10 @@
   function observeUrlChange() {
     const observer = new MutationObserver(() => {
       const currentUrl = location.href;
-      const currentTitle = document.querySelector('h1')?.innerText || '';
+      const currentTitle = document.querySelector("h1")?.innerText || "";
 
       if (currentUrl !== lastUrl) {
-        console.log('[Discogs Price Helper] URL changed detected:', {
+        console.log("[Discogs Price Helper] URL changed detected:", {
           oldUrl: lastUrl,
           newUrl: currentUrl,
           oldTitle: lastTitle,
@@ -108,11 +108,14 @@
       const maxRetries = 300; // 最大30秒待機
 
       const check = () => {
-        const currentTitle = document.querySelector('h1')?.innerText || '';
+        const currentTitle = document.querySelector("h1")?.innerText || "";
 
         // 新しいタイトルが異なり、かつ空でない場合に解決
         if (currentTitle && currentTitle !== lastTitle) {
-          console.log('[Discogs Price Helper] New title detected:', currentTitle);
+          console.log(
+            "[Discogs Price Helper] New title detected:",
+            currentTitle,
+          );
           lastTitle = currentTitle;
           resolve();
           return;
@@ -122,7 +125,9 @@
         if (retries < maxRetries) {
           setTimeout(check, checkInterval);
         } else {
-          console.log('[Discogs Price Helper] Title change timeout, proceeding anyway');
+          console.log(
+            "[Discogs Price Helper] Title change timeout, proceeding anyway",
+          );
           resolve();
         }
       };
@@ -149,7 +154,9 @@
     if (!isTarget) return;
 
     // 新しいタイトルをクリアして待機
-    console.log('[Discogs Price Helper] Clearing old title and waiting for new one...');
+    console.log(
+      "[Discogs Price Helper] Clearing old title and waiting for new one...",
+    );
     await waitForTitle();
 
     const pageData = extractPageData();
@@ -189,18 +196,18 @@
   // =============================
   function waitForTitle() {
     return new Promise((resolve) => {
-      const h1 = document.querySelector('h1');
+      const h1 = document.querySelector("h1");
       if (h1 && h1.innerText) {
-        console.log('[waitForTitle] Title already available:', h1.innerText);
+        console.log("[waitForTitle] Title already available:", h1.innerText);
         resolve();
         return;
       }
 
-      console.log('[waitForTitle] Waiting for h1 element...');
+      console.log("[waitForTitle] Waiting for h1 element...");
       const observer = new MutationObserver(() => {
-        const h1 = document.querySelector('h1');
+        const h1 = document.querySelector("h1");
         if (h1 && h1.innerText) {
-          console.log('[waitForTitle] Title loaded:', h1.innerText);
+          console.log("[waitForTitle] Title loaded:", h1.innerText);
           observer.disconnect();
           resolve();
         }
@@ -214,7 +221,9 @@
       // 最大10秒待機してもタイトルが出現しなければ強制的に続行
       setTimeout(() => {
         observer.disconnect();
-        console.warn('[waitForTitle] Timeout waiting for h1, proceeding anyway');
+        console.warn(
+          "[waitForTitle] Timeout waiting for h1, proceeding anyway",
+        );
         resolve();
       }, 10000);
     });
@@ -425,7 +434,7 @@
         const ids = finalResults.map((r) => r.id.toString());
         const priceList = await fetchPriceData(ids);
 
-        for (const result of finalResults.slice(0, 5)) {
+        for (const result of finalResults) {
           const priceInfo = priceList.find(
             (p) => p.resourceId === result.id.toString(),
           );

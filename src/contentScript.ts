@@ -7,6 +7,7 @@ export type messageCSUnionType = "discogsResult" | "requestPayload";
 // =============================
 
 let lastUrl = location.href;
+let lastTitle = document.querySelector("h1")?.innerText || "";
 let alreadyProcessed = false;
 
 // =============================
@@ -22,16 +23,67 @@ observeUrlChange();
 
 function observeUrlChange() {
   const observer = new MutationObserver(() => {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href;
+    const currentUrl = location.href;
+    const currentTitle = document.querySelector("h1")?.innerText || "";
+
+    if (currentUrl !== lastUrl) {
+      console.log("[ContentScript] URL changed detected:", {
+        oldUrl: lastUrl,
+        newUrl: currentUrl,
+        oldTitle: lastTitle,
+        newTitle: currentTitle,
+      });
+
+      lastUrl = currentUrl;
+      lastTitle = currentTitle;
       alreadyProcessed = false;
-      init();
+
+      // URL変更後、新しいタイトルが読み込まれるまで待機
+      waitForTitleChange().then(() => {
+        init();
+      });
     }
   });
 
   observer.observe(document, {
     subtree: true,
     childList: true,
+  });
+}
+
+// =============================
+// タイトル変更待機（URL変更後の新タイトル検出）
+// =============================
+
+function waitForTitleChange(): Promise<void> {
+  return new Promise((resolve) => {
+    const checkInterval = 100;
+    let retries = 0;
+    const maxRetries = 300; // 最大30秒待機
+
+    const check = () => {
+      const currentTitle = document.querySelector("h1")?.innerText || "";
+
+      // 新しいタイトルが異なり、かつ空でない場合に解決
+      if (currentTitle && currentTitle !== lastTitle) {
+        console.log("[ContentScript] New title detected:", currentTitle);
+        lastTitle = currentTitle;
+        resolve();
+        return;
+      }
+
+      retries++;
+      if (retries < maxRetries) {
+        setTimeout(check, checkInterval);
+      } else {
+        console.log(
+          "[ContentScript] Title change timeout, proceeding anyway"
+        );
+        resolve();
+      }
+    };
+
+    check();
   });
 }
 
@@ -44,9 +96,15 @@ async function init() {
 
   if (!isTargetPage()) return;
 
+  // 新しいタイトルをクリアして待機
+  console.log(
+    "[ContentScript] Clearing old title and waiting for new one..."
+  );
   await waitForTitle();
 
   const pageData = extractPageData();
+
+  console.log("[ContentScript] Page data extracted:", pageData);
 
   if (!pageData.title) return;
 
@@ -83,15 +141,20 @@ function isTargetPage() {
 // タイトル出現待機
 // =============================
 
-function waitForTitle() {
+function waitForTitle(): Promise<void> {
   return new Promise((resolve) => {
-    if (document.querySelector("h1")) {
+    const h1 = document.querySelector("h1");
+    if (h1 && h1.innerText) {
+      console.log("[waitForTitle] Title already available:", h1.innerText);
       resolve();
       return;
     }
 
+    console.log("[waitForTitle] Waiting for h1 element...");
     const observer = new MutationObserver(() => {
-      if (document.querySelector("h1")) {
+      const h1 = document.querySelector("h1");
+      if (h1 && h1.innerText) {
+        console.log("[waitForTitle] Title loaded:", h1.innerText);
         observer.disconnect();
         resolve();
       }
@@ -101,6 +164,15 @@ function waitForTitle() {
       childList: true,
       subtree: true,
     });
+
+    // 最大10秒待機してもタイトルが出現しなければ強制的に続行
+    setTimeout(() => {
+      observer.disconnect();
+      console.warn(
+        "[waitForTitle] Timeout waiting for h1, proceeding anyway"
+      );
+      resolve();
+    }, 10000);
   });
 }
 

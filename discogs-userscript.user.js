@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Price Helper
 // @namespace    http://tampermonkey.net/
-// @version      0.1.1
+// @version      0.1.2
 // @description  Show Discogs price ranges on Mercari and Yahoo Auctions listings
 // @author       You
 // @match        https://jp.mercari.com/item/*

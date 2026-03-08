@@ -110,34 +110,34 @@ iPhoneのホーム画面から
 
 ---
 
-## 4 Userscriptsアプリを開く
+## 4 スクリプトを追加（CDN版）
 
-インストールした
+以下の手順で CDN から直接 Userscript を追加します。
 
-**Userscripts**
+1. 本リポジトリの CDN URL をコピーします。
+   https://cdn.jsdelivr.net/gh/benjaaamin0518/discogs-price-extension@main/discogs-userscript.user.js
 
-アプリを開いてください。
+2. Safariで上記のURLを開き、Safariの「パズルアイコン」を押下
+<p align="center">
+  <img src="2.jpg" height="350px">
+</p>
+3. Userscriptsを押下
+<p align="center">
+  <img src="3.jpg" height="350px">
+</p>
+4. 「Tap to install」を押下
+<p align="center">
+  <img src="4.jpg" height="350px">
+</p>
+5. 画面下の「install」を押下
+<p align="center">
+  <img src="5.jpg" height="350px">
+</p>
+6. これで iOS Safari で対象ページを開くと、自動で Discogs 価格が表示されます
 
 ---
 
-## 5 スクリプトを追加
-
-以下のファイルを追加します。
-
-    discogs-price-helper.user.js
-
-追加方法
-
-1.  `discogs-price-helper.user.js`を本リポジトリよりダウンロード
-2.  ダウンロードした`discogs-price-helper.user.js`を「ファイル」アプリ内でコピーする。
-3.  Userscriptsアプリに戻り「Change Userscripts Directory」ボタンを押下
-4.  開かれたフォルダ選択画面内の余白を長押しし、ペーストを押下し`discogs-price-helper.user.js`を貼り付け
-5.  画面右上の「開く」を押下
-6.  完了
-
----
-
-## 6 Safariでサイトを開く
+## 5 Safariでサイトを開く
 
 Safariで
 

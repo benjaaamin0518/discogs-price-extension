@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Price Helper
 // @namespace    http://tampermonkey.net/
-// @version      0.1.2
+// @version      0.1.3
 // @description  Show Discogs price ranges on Mercari and Yahoo Auctions listings
 // @author       You
 // @match        https://jp.mercari.com/item/*
@@ -28,9 +28,9 @@
   // =============================
   const CONFIG = {
     // これらはUserscriptの設定画面やGM_setValueで変更できるようにしておく
-    GEMINI_ENDPOINT: "http:/34.169.231.99:3000/api/v1/gemini",
+    GEMINI_ENDPOINT: "http://204.168.135.35:3000/api/v1/gemini",
     DISCOGS_TOKEN: "", // 検索用
-    DISCOGS_ENDPOINT: "http://34.169.231.99:3000/api/v1/discogsData",
+    DISCOGS_ENDPOINT: "http://204.168.135.35:3000/api/v1/discogsData",
     ACCESS_TOKEN: "kX9%^mZ7GYd7dduV^m&t5wX9s8Z5n",
   };
 

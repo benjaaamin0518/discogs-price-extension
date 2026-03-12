@@ -28,9 +28,9 @@
   // =============================
   const CONFIG = {
     // これらはUserscriptの設定画面やGM_setValueで変更できるようにしておく
-    GEMINI_ENDPOINT: "http://localhost:3000/api/v1/gemini",
+    GEMINI_ENDPOINT: "http://204.168.135.35:3000/api/v1/gemini",
     DISCOGS_TOKEN: "", // 検索用
-    DISCOGS_ENDPOINT: "http://localhost:3000/api/v1/discogsData",
+    DISCOGS_ENDPOINT: "http://204.168.135.35:3000/api/v1/discogsData",
     ACCESS_TOKEN: "kX9%^mZ7GYd7dduV^m&t5wX9s8Z5n",
   };
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Price Helper
 // @namespace    http://tampermonkey.net/
-// @version      0.1.3
+// @version      0.1.4
 // @description  Show Discogs price ranges on Mercari and Yahoo Auctions listings
 // @author       You
 // @match        https://jp.mercari.com/item/*
@@ -28,9 +28,9 @@
   // =============================
   const CONFIG = {
     // これらはUserscriptの設定画面やGM_setValueで変更できるようにしておく
-    GEMINI_ENDPOINT: "http://204.168.135.35:3000/api/v1/gemini",
+    GEMINI_ENDPOINT: "http://localhost:3000/api/v1/gemini",
     DISCOGS_TOKEN: "", // 検索用
-    DISCOGS_ENDPOINT: "http://204.168.135.35:3000/api/v1/discogsData",
+    DISCOGS_ENDPOINT: "http://localhost:3000/api/v1/discogsData",
     ACCESS_TOKEN: "kX9%^mZ7GYd7dduV^m&t5wX9s8Z5n",
   };
 
@@ -375,14 +375,16 @@
         console.log("[getDiscogsMedian] Processing:", meta);
         const formats = parseFormat(meta.format);
         const searchParams = {};
+        const searchArr = [];
 
         // カタログナンバーがあれば優先
         if (meta.catalog_number) {
           searchParams.catno = meta.catalog_number;
         } else {
-          if (meta.artist) searchParams.artist = meta.artist;
-          if (meta.title) searchParams.release_title = meta.title;
-          if (formats[0]) searchParams.format = formats[0];
+          if (meta.artist) searchArr.push(meta.artist);
+          if (meta.title) searchArr.push(meta.title);
+          if (formats[0]) searchArr.push(formats[0]);
+          searchParams.q = searchArr.join(" ");
         }
 
         // 1回目検索

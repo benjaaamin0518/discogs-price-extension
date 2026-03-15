@@ -1,669 +1,431 @@
 // ==UserScript==
-// @name         Discogs Price Helper
+// @name         Discogs Price Helper Pro
 // @namespace    http://tampermonkey.net/
-// @version      0.1.5
-// @description  Show Discogs price ranges on Mercari and Yahoo Auctions listings
-// @author       You
+// @version      2.1.1
+// @description  Discogs price viewer (Mercari / Yahoo / eBay) — scrollable UI for large results
 // @match        https://jp.mercari.com/item/*
 // @match        *://auctions.yahoo.co.jp/jp/auction/*
-// @match        *://aucfree.com/*
-// @match        *://yahoo.co.jp/*
-// @grant        GM_xmlHttpRequest
+// @match        *://www.ebay.com/itm/*
 // @grant        GM.xmlHttpRequest
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM.getValue
-// @grant        GM.setValue
-// @connect      api.discogs.com
 // @connect      *
 // ==/UserScript==
 
-(async function () {
+(function () {
   "use strict";
 
-  console.log("[Discogs Price Helper] Script initialized");
-
-  // =============================
-  // 設定（環境変数を置き換え）
-  // =============================
   const CONFIG = {
-    // これらはUserscriptの設定画面やGM_setValueで変更できるようにしておく
-    GEMINI_ENDPOINT: "http://204.168.135.35:3000/api/v1/gemini",
-    DISCOGS_TOKEN: "", // 検索用
-    DISCOGS_ENDPOINT: "http://204.168.135.35:3000/api/v1/discogsData",
+    API_BASE: "http://204.168.135.35:3000",
+    GEMINI: "/api/v1/gemini",
+    DISCOGS: "/api/v1/discogsData",
+    JOB: "/api/scrape",
     ACCESS_TOKEN: "kX9%^mZ7GYd7dduV^m&t5wX9s8Z5n",
+    POLL_INTERVAL: 2500,
   };
 
-  console.log("[Discogs Price Helper] CONFIG:", {
-    GEMINI_ENDPOINT: CONFIG.GEMINI_ENDPOINT ? "✓ Set" : "✗ Not set",
-    DISCOGS_TOKEN: CONFIG.DISCOGS_TOKEN ? "✓ Set" : "✗ Not set",
-    DISCOGS_ENDPOINT: CONFIG.DISCOGS_ENDPOINT ? "✓ Set" : "✗ Not set",
-    ACCESS_TOKEN: CONFIG.ACCESS_TOKEN ? "✓ Set" : "✗ Not set",
-  });
-
-  // 必要な設定が欠けていれば初回設定を実行
-  if (
-    !CONFIG.GEMINI_ENDPOINT ||
-    !CONFIG.DISCOGS_ENDPOINT ||
-    !CONFIG.ACCESS_TOKEN
-  ) {
-    initializeConfig();
-    return;
-  }
-
-  // =============================
-  // 状態管理
-  // =============================
+  let running = false;
+  let collapsed = false;
   let lastUrl = location.href;
-  let lastTitle = document.querySelector("h1")?.innerText || "";
-  let alreadyProcessed = false;
 
-  // =============================
-  // 初期化
-  // =============================
   init();
-  observeUrlChange();
+  observeUrl();
 
-  // =============================
-  // URL変更監視（SPA対策）
-  // =============================
-  function observeUrlChange() {
-    const observer = new MutationObserver(() => {
-      const currentUrl = location.href;
-      const currentTitle = document.querySelector("h1")?.innerText || "";
-
-      if (currentUrl !== lastUrl) {
-        console.log("[Discogs Price Helper] URL changed detected:", {
-          oldUrl: lastUrl,
-          newUrl: currentUrl,
-          oldTitle: lastTitle,
-          newTitle: currentTitle,
-        });
-
-        lastUrl = currentUrl;
-        lastTitle = currentTitle;
-        alreadyProcessed = false;
-        removeOldUI(); // 古いUIをクリア
-
-        // URL変更後、新しいタイトルが読み込まれるまで待機
-        waitForTitleChange().then(() => {
-          init();
-        });
+  function observeUrl() {
+    const obs = new MutationObserver(() => {
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        running = false;
+        removeUI();
+        init();
       }
     });
-
-    observer.observe(document, {
-      subtree: true,
-      childList: true,
-    });
+    obs.observe(document, { subtree: true, childList: true });
   }
 
-  // =============================
-  // タイトル変更待機（URL変更後の新タイトル検出）
-  // =============================
-  function waitForTitleChange() {
-    return new Promise((resolve) => {
-      const checkInterval = 100;
-      let retries = 0;
-      const maxRetries = 300; // 最大30秒待機
-
-      const check = () => {
-        const currentTitle = document.querySelector("h1")?.innerText || "";
-
-        // 新しいタイトルが異なり、かつ空でない場合に解決
-        if (currentTitle && currentTitle !== lastTitle) {
-          console.log(
-            "[Discogs Price Helper] New title detected:",
-            currentTitle,
-          );
-          lastTitle = currentTitle;
-          resolve();
-          return;
-        }
-
-        retries++;
-        if (retries < maxRetries) {
-          setTimeout(check, checkInterval);
-        } else {
-          console.log(
-            "[Discogs Price Helper] Title change timeout, proceeding anyway",
-          );
-          resolve();
-        }
-      };
-
-      check();
-    });
-  }
-
-  // =============================
-  // メイン処理
-  // =============================
   async function init() {
-    if (alreadyProcessed) {
-      console.log("[Discogs Price Helper] Already processed, skipping...");
-      return;
-    }
+    if (running) return;
+    if (!isTargetPage()) return;
 
-    const isTarget = isTargetPage();
-    console.log("[Discogs Price Helper] Page check:", {
-      url: location.href,
-      isTargetPage: isTarget,
-    });
+    await waitTitle();
 
-    if (!isTarget) return;
+    const page = extractPage();
 
-    // 新しいタイトルをクリアして待機
-    console.log(
-      "[Discogs Price Helper] Clearing old title and waiting for new one...",
-    );
-    await waitForTitle();
+    if (!page.title) return;
 
-    const pageData = extractPageData();
-    console.log("[Discogs Price Helper] Page data extracted:", pageData);
+    running = true;
 
-    if (!pageData.title) {
-      console.log("[Discogs Price Helper] No title found, skipping...");
-      return;
-    }
-
-    alreadyProcessed = true;
-
-    showLoadingUI();
+    showLoading();
 
     try {
-      const result = await handlePage(pageData);
-      console.log("[Discogs Price Helper] Results:", result);
-      injectResultUI(result);
-    } catch (err) {
-      console.error("[Discogs Price Helper] Error:", err);
-      showErrorUI("エラーが発生しました: " + String(err));
-    }
-  }
+      const meta = await gemini(page);
+      const releases = await searchDiscogs(meta);
 
-  // =============================
-  // 対象ページ判定
-  // =============================
-  function isTargetPage() {
-    return (
-      location.href.includes("mercari.com/item") ||
-      location.href.includes("auctions.yahoo.co.jp/jp/auction")
-    );
-  }
-
-  // =============================
-  // タイトル出現待機
-  // =============================
-  function waitForTitle() {
-    return new Promise((resolve) => {
-      const h1 = document.querySelector("h1");
-      if (h1 && h1.innerText) {
-        console.log("[waitForTitle] Title already available:", h1.innerText);
-        resolve();
+      if (!releases.length) {
+        showError("Discogs候補なし");
         return;
       }
 
-      console.log("[waitForTitle] Waiting for h1 element...");
-      const observer = new MutationObserver(() => {
-        const h1 = document.querySelector("h1");
-        if (h1 && h1.innerText) {
-          console.log("[waitForTitle] Title loaded:", h1.innerText);
-          observer.disconnect();
-          resolve();
-        }
-      });
+      renderResults(releases);
 
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-      });
+      const ids = releases.map((r) => r.id.toString());
+      const jobId = await createJob(ids);
 
-      // 最大10秒待機してもタイトルが出現しなければ強制的に続行
-      setTimeout(() => {
-        observer.disconnect();
-        console.warn(
-          "[waitForTitle] Timeout waiting for h1, proceeding anyway",
-        );
-        resolve();
-      }, 10000);
-    });
-  }
-
-  // =============================
-  // データ抽出
-  // =============================
-  function extractPageData() {
-    const title = document.querySelector("h1")?.innerText || "";
-
-    const mercariDesc = document.querySelector(
-      '[data-testid="description"]',
-    )?.textContent;
-
-    const yahooDesc = document.querySelector("#description")?.textContent;
-
-    const description = mercariDesc || yahooDesc || "";
-
-    return { title, description };
-  }
-
-  // =============================
-  // バックエンド処理
-  // =============================
-  async function handlePage(payload) {
-    console.log("[handlePage] Sending request to Gemini endpoint...");
-    const response = await gmFetch(CONFIG.GEMINI_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      data: {
-        title: payload.title,
-        description: payload.description,
-        accessToken: CONFIG.ACCESS_TOKEN,
-      },
-    });
-
-    console.log("[handlePage] Gemini response:", response);
-
-    if (response.error) {
-      throw new Error("Geminiエラー: " + response.error);
+      await pollJob(jobId, updatePrices);
+    } catch (e) {
+      console.error(e);
+      showError(e?.message ?? String(e));
     }
-
-    // geminiResultがnullの場合は空配列を返す
-    const geminiResult = response.result;
-    if (!geminiResult || !geminiResult.title) {
-      throw new Error("Geminiが商品情報を解析できませんでした");
-    }
-
-    console.log("[handlePage] Gemini result:", geminiResult);
-
-    const discogsResult = await getDiscogsMedian([geminiResult]);
-
-    return discogsResult;
   }
 
-  // =============================
-  // ユーティリティ関数
-  // =============================
-  function parseFormat(format) {
-    if (!format) return [];
-    return format
-      .split(",")
-      .map((v) => v.trim())
-      .filter(Boolean);
-  }
-
-  function normalizeFormat(geminiFormat, discogsRelease) {
-    const parts = parseFormat(geminiFormat);
-
-    if (parts[0] !== "Vinyl") return parts;
-
-    const descriptions = discogsRelease.formats?.[0]?.descriptions ?? [];
-    const SIZE_SET = new Set(["LP", "EP"]);
-
-    let discogsSize = null;
-    for (const d of descriptions) {
-      if (SIZE_SET.has(d)) {
-        discogsSize = d;
-      }
-    }
-
-    let geminiSize = parts[1] ?? null;
-    if (discogsSize) geminiSize = discogsSize;
-
-    return ["Vinyl", geminiSize].filter(Boolean);
-  }
-
-  // =============================
-  // Discogs API呼び出し
-  // =============================
-  async function discogsSearch(params) {
-    const searchParams = { ...params };
-    console.log("[discogsSearch] Searching with params:", searchParams);
-    const response = await gmFetch("https://api.discogs.com/database/search", {
-      params: searchParams,
-    });
-    console.log(
-      "[discogsSearch] Found results:",
-      response.results?.length || 0,
+  function isTargetPage() {
+    const u = location.href;
+    return (
+      u.includes("mercari.com/item") ||
+      u.includes("auctions.yahoo.co.jp") ||
+      u.includes("ebay.com/itm")
     );
-    return response;
   }
 
-  async function getRelease(id) {
-    console.log("[getRelease] Getting release:", id);
-    const response = await gmFetch(`https://api.discogs.com/releases/${id}`, {
-      params: { token: CONFIG.DISCOGS_TOKEN },
+  function waitTitle() {
+    return new Promise((res) => {
+      let t = 0;
+      const i = setInterval(() => {
+        const h = document.querySelector("h1");
+        if (h?.innerText) {
+          clearInterval(i);
+          res();
+        }
+        if (t++ > 50) {
+          clearInterval(i);
+          res();
+        }
+      }, 200);
     });
-    return response;
   }
 
-  // 価格取得は外部のプロキシAPI（Discogs Data API）を使用します。
+  function extractPage() {
+    const title = document.querySelector("h1")?.innerText || document.title;
+    let desc = "";
+    if (location.href.includes("mercari"))
+      desc =
+        document.querySelector('[data-testid="description"]')?.innerText || "";
+    if (location.href.includes("yahoo"))
+      desc = document.querySelector("#description")?.innerText || "";
+    if (location.href.includes("ebay"))
+      desc =
+        document.querySelector("#viTabs_0_is")?.innerText ||
+        document.querySelector("#itemDescription")?.innerText ||
+        "";
+    return { title, description: desc };
+  }
 
-  async function fetchPriceData(ids) {
-    if (!ids || ids.length === 0) return [];
-    console.log("[fetchPriceData] requesting for ids", ids);
-    const resp = await gmFetch(CONFIG.DISCOGS_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      data: {
-        resourceIds: ids,
-        accessToken: CONFIG.ACCESS_TOKEN,
-      },
+  async function gemini(data) {
+    const r = await request(CONFIG.API_BASE + CONFIG.GEMINI, "POST", {
+      accessToken: CONFIG.ACCESS_TOKEN,
+      ...data,
     });
-    // APIは { result: Array<{resourceId,lowest,median,highest}> } を返す想定
-    const list = resp?.result || [];
-    console.log("[fetchPriceData] received", list);
-    return list;
+    return r.result;
   }
 
-  // =============================
-  // Discogs データ取得（本体）
-  // =============================
-  async function getDiscogsMedian(metaArray) {
-    if (!metaArray || metaArray.length === 0) {
-      console.log("[getDiscogsMedian] No metadata, returning empty");
-      return [];
+  async function searchDiscogs(meta) {
+    let q = [];
+    if (meta?.catalog_number) q.push(meta.catalog_number);
+    else {
+      if (meta?.artist) q.push(meta.artist);
+      if (meta?.title) q.push(meta.title);
     }
 
-    const results = [];
+    const r = await request(
+      "https://api.discogs.com/database/search",
+      "GET",
+      null,
+      {
+        q: q.join(" "),
+      },
+    );
 
-    for (const meta of metaArray) {
-      try {
-        console.log("[getDiscogsMedian] Processing:", meta);
-        const formats = parseFormat(meta.format);
-        const searchParams = {};
-        const searchArr = [];
+    return (r.results || []).map((v) => ({
+      id: v.id,
+      title: v.title,
+      format: v.format?.join(", "),
+      year: v.year,
+      lowest: null,
+      median: null,
+      highest: null,
+    }));
+  }
 
-        // カタログナンバーがあれば優先
-        if (meta.catalog_number) {
-          searchParams.catno = meta.catalog_number;
-        } else {
-          if (meta.artist) searchArr.push(meta.artist);
-          if (meta.title) searchArr.push(meta.title);
-          if (formats[0]) searchArr.push(formats[0]);
-          searchParams.q = searchArr.join(" ");
-        }
+  async function createJob(ids) {
+    const r = await request(CONFIG.API_BASE + CONFIG.DISCOGS, "POST", {
+      resourceIds: ids,
+      accessToken: CONFIG.ACCESS_TOKEN,
+    });
+    return r.jobId;
+  }
 
-        // 1回目検索
-        const search = await discogsSearch(searchParams);
-
-        if (!search.results?.length) {
-          console.log("[getDiscogsMedian] No search results");
-          continue;
-        }
-
-        const releaseId = search.results[0].id;
-        let finalResults = search.results;
-
-        // Vinyl の場合は詳細な補正を行う
-        if (formats[0] === "Vinyl") {
-          try {
-            console.log(
-              "[getDiscogsMedian] Vinyl found, normalizing format...",
-            );
-            const release = await getRelease(releaseId);
-            const normalized = normalizeFormat(meta.format, release);
-            console.log("[getDiscogsMedian] Normalized format:", normalized);
-
-            if (normalized.length >= 2) {
-              // 2回目検索（正規化されたサイズ付き）
-              const secondSearch = await discogsSearch({
-                ...searchParams,
-                format: normalized[0],
-                format2: normalized[1],
-              });
-
-              if (secondSearch.results?.length) {
-                finalResults = secondSearch.results;
-                console.log(
-                  "[getDiscogsMedian] Second search results:",
-                  finalResults.length,
-                );
-              }
-            }
-          } catch (err) {
-            console.warn(
-              "[getDiscogsMedian] Vinyl normalization failed, using original results:",
-              err,
-            );
-          }
-        }
-
-        // 各結果の価格情報を取得　→ 外部APIを利用
-        const ids = finalResults.map((r) => r.id.toString());
-        const priceList = await fetchPriceData(ids);
-
-        for (const result of finalResults) {
-          const priceInfo = priceList.find(
-            (p) => p.resourceId === result.id.toString(),
+  async function pollJob(id, onUpdate) {
+    return new Promise((resolve) => {
+      const t = setInterval(async () => {
+        try {
+          const job = await request(
+            `${CONFIG.API_BASE}${CONFIG.JOB}/${id}`,
+            "POST",
+            {
+              accessToken: CONFIG.ACCESS_TOKEN,
+            },
           );
-          results.push({
-            id: result.id,
-            title: result.title,
-            format: result.format?.join(", ") || null,
-            year: result.year,
-            lowest: priceInfo?.lowest ?? null,
-            median: priceInfo?.median ?? null,
-            highest: priceInfo?.highest ?? null,
-          });
-        }
-      } catch (err) {
-        console.error(
-          "[getDiscogsMedian] Error processing metadata:",
-          meta,
-          err,
-        );
-      }
-    }
 
-    console.log("[getDiscogsMedian] Final results:", results);
-    return results;
-  }
+          if (job) onUpdate(job);
 
-  // =============================
-  // GM_xmlHttpRequest ラッパー
-  // =============================
-  function gmFetch(url, options = {}) {
-    return new Promise((resolve, reject) => {
-      const method = options.method || "GET";
-      const headers = { ...options.headers };
-      let finalUrl = url;
-
-      // URLパラメータ の処理
-      if (options.params) {
-        const qs = new URLSearchParams(options.params).toString();
-        finalUrl = `${url}?${qs}`;
-      }
-
-      console.log("[gmFetch]", method, finalUrl);
-
-      const config = {
-        method,
-        url: finalUrl,
-        headers,
-        onload: (response) => {
-          console.log("[gmFetch] Response status:", response.status);
-          try {
-            const result = JSON.parse(response.responseText);
-            resolve(result);
-          } catch (e) {
-            console.warn(
-              "[gmFetch] Failed to parse as JSON, returning raw text",
-            );
-            resolve(response.responseText);
+          if (job && job.successJobCount === job.penddingJobCount) {
+            clearInterval(t);
+            resolve(job);
           }
-        },
-        onerror: (err) => {
-          console.error("[gmFetch] Network error:", err);
-          reject(new Error("Network error: " + String(err)));
-        },
-        ontimeout: () => {
-          console.error("[gmFetch] Request timeout");
-          reject(new Error("Request timeout"));
-        },
-      };
-
-      // POSTデータの処理
-      if (options.data) {
-        config.data = JSON.stringify(options.data);
-      }
-
-      GM.xmlHttpRequest(config);
+        } catch (err) {
+          // ネットワーク等の一時エラーは無視して再試行
+          console.warn("[pollJob] error", err);
+        }
+      }, CONFIG.POLL_INTERVAL);
     });
   }
 
-  // =============================
-  // UI表示
-  // =============================
-  function showLoadingUI() {
-    removeOldUI();
+  function updatePrices(job) {
+    if (!job) return;
+    const total = job.penddingJobCount || 0;
+    const done = job.successJobCount || 0;
 
-    const box = createBaseUI();
-    box.innerHTML = "Discogs解析中...";
-    document.body.prepend(box);
-  }
+    const bar = document.querySelector("#discogs-progress");
+    if (bar && total > 0) bar.style.width = (done / total) * 100 + "%";
 
-  function showErrorUI(message) {
-    removeOldUI();
+    const status = document.querySelector("#discogs-status");
+    if (status) status.innerText = `Fetching prices ${done}/${total}`;
 
-    const box = createBaseUI();
-    box.style.background = "#f8d7da";
-    box.style.color = "#721c24";
-    box.innerHTML = message;
-    document.body.prepend(box);
-  }
+    for (const s of job.successJobs || []) {
+      const el = document.querySelector(`[data-id="${s.resourceId}"]`);
+      if (!el) continue;
+      el.querySelector(".low").innerText = s.lowest ?? "N/A";
+      el.querySelector(".med").innerText = s.median ?? "N/A";
+      el.querySelector(".high").innerText = s.highest ?? "N/A";
+    }
 
-  function getDiscogsPriceTable(lowest, median, highest) {
-    const html = `
-      <table style="border-collapse: collapse; width: 100%; margin-top: 8px;">
-        <thead>
-          <tr>
-            <th style="border: 1px solid #ccc; padding: 4px;">PriceRange</th>
-            <th style="border: 1px solid #ccc; padding: 4px;">Price (¥)</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td style="border: 1px solid #ccc; padding: 4px;">最低価格</td>
-            <td style="border: 1px solid #ccc; padding: 4px;">${lowest ?? "N/A"}</td>
-          </tr>
-          <tr>
-            <td style="border: 1px solid #ccc; padding: 4px;">中間価格</td>
-            <td style="border: 1px solid #ccc; padding: 4px;">${median ?? "N/A"}</td>
-          </tr>
-          <tr>
-            <td style="border: 1px solid #ccc; padding: 4px;">最高価格</td>
-            <td style="border: 1px solid #ccc; padding: 4px;">${highest ?? "N/A"}</td>
-          </tr>
-        </tbody>
-      </table>
-    `;
-    return html;
-  }
-
-  function addToWatchlist(data) {
-    const mercariPrice = document.querySelector(
-      '[data-testid="price"]',
-    )?.textContent;
-
-    const yahooPrice = document.querySelector(
-      ".sc-1f0603b0-2.kxUAXU",
-    )?.textContent;
-
-    const price = mercariPrice || yahooPrice || "";
-    const entry = {
-      id: data.id,
-      title: data?.title ?? "unknown",
-      url: window.location.href,
-      price,
-      prices: `最低:${data.lowest ?? "N/A"} 中間:${data.median ?? "N/A"} 最高:${data.highest ?? "N/A"}`,
-      timestamp: new Date().toISOString(),
-    };
-
-    try {
-      const watchlist = GM_getValue("watchlist", []);
-      const next = [entry, ...watchlist];
-      GM_setValue("watchlist", next);
-      console.log("[Discogs Price Helper] Added to watchlist:", entry);
-      alert("ウォッチリストに追加しました");
-    } catch (err) {
-      console.error("[Discogs Price Helper] Failed to add to watchlist:", err);
-      alert("ウォッチリストへの追加に失敗しました");
+    if (total > 0 && done === total) {
+      const statusDone = document.querySelector("#discogs-status");
+      if (statusDone) statusDone.innerText = "Complete";
     }
   }
 
-  function injectResultUI(data) {
-    removeOldUI();
+  function showLoading() {
+    removeUI();
+    const box = createUI();
+    document.body.prepend(box);
+  }
 
-    const box = createBaseUI();
-
-    box.innerHTML = data
+  function renderResults(data) {
+    const box = document.getElementById("discogs-ui");
+    if (!box) return;
+    const list = box.querySelector("#discogs-list");
+    box.querySelector("#discogs-status").innerText = "Searching Discogs...";
+    list.innerHTML = data
       .map(
-        (d, index) => `
-      <div class="discogs-item" style="margin-bottom: 12px;">
-        <div><a href="https://www.discogs.com/release/${d.id}" target="_blank" style="color: #0066cc; font-weight: bold;"><b>${d.title}</b></a></div>
-        <div style="font-size: 12px; color: #666;">${d.format ?? ""} ${d.year ?? ""}</div>
-        <div><a href="#" class="watchlist-btn" data-index="${index}" style="cursor:pointer; color: #0066cc; font-size: 12px;">ウォッチリストに追加</a></div>
-        ${getDiscogsPriceTable(d.lowest, d.median, d.highest)}
-        <hr style="margin: 8px 0; border: none; border-top: 1px solid #ddd;"/>
-      </div>
-    `,
+        (r) => `
+<div class="discogs-card" data-id="${r.id}">
+  <div class="discogs-title">${escapeHtml(r.title)}</div>
+  <div class="discogs-meta">${escapeHtml(r.format || "")} ${r.year || ""}</div>
+  <div class="discogs-price"><span>Lowest</span><span class="low">-</span></div>
+  <div class="discogs-price"><span>Median</span><span class="med">-</span></div>
+  <div class="discogs-price"><span>Highest</span><span class="high">-</span></div>
+  <a target="_blank" href="https://discogs.com/release/${r.id}" class="discogs-btn" style="color:#fff">Open Discogs</a>
+</div>
+`,
       )
       .join("");
-
-    const buttons = box.querySelectorAll(".watchlist-btn");
-    buttons.forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        const index = Number(btn.dataset.index);
-        const item = data[index];
-        addToWatchlist(item);
-      });
-    });
-
-    const close = document.createElement("button");
-    close.textContent = "×";
-    close.style.position = "absolute";
-    close.style.top = "6px";
-    close.style.right = "8px";
-    close.style.border = "none";
-    close.style.background = "transparent";
-    close.style.fontSize = "20px";
-    close.style.cursor = "pointer";
-    close.style.color = "#fff";
-    close.addEventListener("click", () => removeOldUI());
-    box.appendChild(close);
-
-    document.body.prepend(box);
   }
 
-  function createBaseUI() {
+  function createUI() {
+    injectStyle();
+
     const box = document.createElement("div");
+    box.id = "discogs-ui";
 
-    box.id = "discogs-price-box";
+    box.innerHTML = `
+<div class="discogs-head">
+  <div style="display:flex;gap:8px;align-items:center">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="opacity:.9"><path d="M3 12a9 9 0 1 1 18 0 9 9 0 0 1-18 0z" stroke="#9be7ff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 12h8" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <strong>Discogs Analyzer</strong>
+  </div>
+  <div id="discogs-toggle" title="Toggle">▾</div>
+</div>
 
-    box.style.position = "fixed";
-    box.style.top = "20px";
-    box.style.right = "20px";
-    box.style.zIndex = "999999";
-    box.style.maxHeight = "70vh";
-    box.style.overflow = "auto";
-    box.style.backgroundColor = "#222";
-    box.style.color = "#fff";
-    box.style.padding = "12px";
-    box.style.borderRadius = "8px";
-    box.style.boxShadow = "0 4px 6px rgba(0, 0, 0, 0.3)";
-    box.style.fontFamily = "Arial, sans-serif";
-    box.style.fontSize = "14px";
-    box.style.maxWidth = "320px";
+<div id="discogs-status" aria-live="polite">Analyzing...</div>
+
+<div class="discogs-progress">
+  <div id="discogs-progress"></div>
+</div>
+
+<div id="discogs-list" class="discogs-list" role="list"></div>
+`;
+
+    const toggleBtn = box.querySelector("#discogs-toggle");
+
+    if (toggleBtn) {
+      toggleBtn.addEventListener("click", toggleUI);
+    }
 
     return box;
   }
 
-  function removeOldUI() {
-    document.getElementById("discogs-price-box")?.remove();
+  function removeUI() {
+    document.getElementById("discogs-ui")?.remove();
+  }
+  function toggleUI() {
+    collapsed = !collapsed;
+
+    const list = document.querySelector("#discogs-list");
+    const progress = document.querySelector(".discogs-progress");
+    const status = document.querySelector("#discogs-status");
+    const btn = document.querySelector("#discogs-toggle");
+
+    if (collapsed) {
+      list.style.display = "none";
+      progress.style.display = "none";
+      status.style.display = "none";
+
+      btn.innerText = "▸";
+    } else {
+      list.style.display = "block";
+      progress.style.display = "block";
+      status.style.display = "block";
+
+      btn.innerText = "▾";
+    }
+  }
+
+  function injectStyle() {
+    if (document.getElementById("discogs-style")) return;
+
+    const s = document.createElement("style");
+    s.id = "discogs-style";
+    s.innerHTML = `
+#discogs-ui{
+  position:fixed;
+  top:80px;
+  right:20px;
+  width:360px;
+  max-height:70vh;         /* 全体の最大高さ */
+  overflow:hidden;         /* 内部要素でスクロールさせる */
+  background:#111;
+  color:#fff;
+  padding:12px;
+  border-radius:12px;
+  font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  box-shadow:0 15px 40px rgba(0,0,0,.5);
+  z-index:999999;
+  box-sizing:border-box;
+}
+
+/* ヘッダ */
+.discogs-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:8px;
+  gap:8px;
+  font-weight:600;
+  font-size:14px;
+}
+
+/* ステータス */
+#discogs-status{
+  font-size:13px;
+  color:#d1e9f6;
+  margin-bottom:8px;
+}
+
+/* プログレスバー */
+.discogs-progress{
+  height:8px;
+  background:#222;
+  border-radius:8px;
+  overflow:hidden;
+  margin-bottom:10px;
+}
+#discogs-progress{
+  height:100%;
+  background:linear-gradient(90deg,#06b6d4,#3b82f6);
+  width:0%;
+  transition:width .3s ease;
+}
+
+/* リスト部分をスクロール可能に */
+.discogs-list{
+  max-height: calc(70vh - 140px); /* ヘッダなどの高さを差し引いた領域を最大に */
+  overflow:auto;
+  padding-right:8px;
+}
+
+/* カード */
+.discogs-card{
+  background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  padding:10px;
+  border-radius:8px;
+  margin-bottom:10px;
+  border:1px solid rgba(255,255,255,0.03);
+}
+.discogs-title{font-size:13px;font-weight:700;margin-bottom:4px;}
+.discogs-meta{font-size:11px;color:#9aa3ad;margin-bottom:6px;}
+.discogs-price{display:flex;justify-content:space-between;font-size:12px;margin:2px 0;}
+.discogs-btn{display:inline-block;margin-top:6px;background:#2563eb;padding:6px 10px;border-radius:6px;text-decoration:none;font-size:12px;color:#fff;}
+
+/* カスタムスクロール（軽め） */
+.discogs-list::-webkit-scrollbar{width:10px}
+.discogs-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:6px}
+.discogs-list::-webkit-scrollbar-track{background:transparent}
+
+/* Close ボタン */
+#discogs-close{cursor:pointer;color:#fff;padding:4px 8px;border-radius:6px;background:transparent}
+#discogs-close:hover{background:rgba(255,255,255,0.03)}
+`;
+    document.head.appendChild(s);
+  }
+
+  function showError(m) {
+    removeUI();
+    const b = createUI();
+    b.querySelector("#discogs-status").innerText = m;
+    document.body.prepend(b);
+  }
+
+  function request(url, method, data, params) {
+    return new Promise((resolve, reject) => {
+      let u = url;
+      if (params) {
+        u += "?" + new URLSearchParams(params);
+      }
+      GM.xmlHttpRequest({
+        method: method || "GET",
+        url: u,
+        headers: { "Content-Type": "application/json" },
+        data: data ? JSON.stringify(data) : undefined,
+        onload: (r) => {
+          try {
+            resolve(JSON.parse(r.responseText));
+          } catch {
+            resolve(r.responseText);
+          }
+        },
+        onerror: (err) => {
+          reject(err);
+        },
+      });
+    });
+  }
+
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 })();

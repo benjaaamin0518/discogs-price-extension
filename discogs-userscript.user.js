@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Price Helper Pro
 // @namespace    http://tampermonkey.net/
-// @version      2.1.1
+// @version      2.1.2
 // @description  Discogs price viewer (Mercari / Yahoo / eBay) — scrollable UI for large results
 // @match        https://jp.mercari.com/item/*
 // @match        *://auctions.yahoo.co.jp/jp/auction/*
@@ -25,7 +25,7 @@
   let running = false;
   let collapsed = false;
   let lastUrl = location.href;
-
+  const id = crypto.randomUUID();
   init();
   observeUrl();
 
@@ -52,7 +52,6 @@
     if (!page.title) return;
 
     running = true;
-
     showLoading();
 
     try {
@@ -67,9 +66,16 @@
       renderResults(releases);
 
       const ids = releases.map((r) => r.id.toString());
-      const jobId = await createJob(ids);
 
-      await pollJob(jobId, updatePrices);
+      pollJob(updatePrices);
+      const res = await createJob(id, ids);
+      for (const s of res) {
+        const el = document.querySelector(`[data-id="${s.resourceId}"]`);
+        if (!el) continue;
+        el.querySelector(".low").innerText = s.lowest ?? "N/A";
+        el.querySelector(".med").innerText = s.median ?? "N/A";
+        el.querySelector(".high").innerText = s.highest ?? "N/A";
+      }
     } catch (e) {
       console.error(e);
       showError(e?.message ?? String(e));
@@ -154,42 +160,41 @@
     }));
   }
 
-  async function createJob(ids) {
+  async function createJob(jobId, ids) {
     const r = await request(CONFIG.API_BASE + CONFIG.DISCOGS, "POST", {
       resourceIds: ids,
       accessToken: CONFIG.ACCESS_TOKEN,
+      jobId,
     });
-    return r.jobId;
+    return r;
   }
 
-  async function pollJob(id, onUpdate) {
-    return new Promise((resolve) => {
-      const t = setInterval(async () => {
-        try {
-          const job = await request(
-            `${CONFIG.API_BASE}${CONFIG.JOB}/${id}`,
-            "POST",
-            {
-              accessToken: CONFIG.ACCESS_TOKEN,
-            },
-          );
+  function pollJob(onUpdate) {
+    const t = setInterval(async () => {
+      try {
+        const job = await request(
+          `${CONFIG.API_BASE}${CONFIG.JOB}/${id}`,
+          "POST",
+          {
+            accessToken: CONFIG.ACCESS_TOKEN,
+          },
+        );
 
-          if (job) onUpdate(job);
+        if (job) onUpdate(job);
 
-          if (job && job.successJobCount === job.penddingJobCount) {
-            clearInterval(t);
-            resolve(job);
-          }
-        } catch (err) {
-          // ネットワーク等の一時エラーは無視して再試行
-          console.warn("[pollJob] error", err);
+        if (job && job.successJobCount === job.penddingJobCount) {
+          clearInterval(t);
         }
-      }, CONFIG.POLL_INTERVAL);
-    });
+      } catch (err) {
+        // ネットワーク等の一時エラーは無視して再試行
+        console.warn("[pollJob] error", err);
+      }
+    }, CONFIG.POLL_INTERVAL);
   }
 
   function updatePrices(job) {
     if (!job) return;
+    // alert(JSON.stringify(job));
     const total = job.penddingJobCount || 0;
     const done = job.successJobCount || 0;
 
@@ -199,17 +204,30 @@
     const status = document.querySelector("#discogs-status");
     if (status) status.innerText = `Fetching prices ${done}/${total}`;
 
-    for (const s of job.successJobs || []) {
-      const el = document.querySelector(`[data-id="${s.resourceId}"]`);
-      if (!el) continue;
-      el.querySelector(".low").innerText = s.lowest ?? "N/A";
-      el.querySelector(".med").innerText = s.median ?? "N/A";
-      el.querySelector(".high").innerText = s.highest ?? "N/A";
+    // ヘッダのバッジを更新
+    const badge = document.getElementById("discogs-badge");
+    if (badge) {
+      if (total > 0) {
+        const pct = Math.round((done / total) * 100);
+        badge.innerText = `${pct}%`;
+        // 折りたたまれた時に見えるように表示
+        if (collapsed) badge.style.display = "inline-block";
+      } else {
+        badge.innerText = `0%`;
+      }
     }
+
+    // 常駐ミニインジケーターを更新（存在すれば）
+    updateMiniIndicator(done, total);
 
     if (total > 0 && done === total) {
       const statusDone = document.querySelector("#discogs-status");
       if (statusDone) statusDone.innerText = "Complete";
+      // mini も Done 表示にする（任意で非表示に）
+      const mini = document.getElementById("discogs-mini-indicator");
+      if (mini) mini.querySelector("#discogs-mini-label").innerText = "Done";
+      // 必要なら一定時間後に自動で消す処理も入れられます
+      // setTimeout(()=> mini?.remove(), 5000);
     }
   }
 
@@ -217,6 +235,7 @@
     removeUI();
     const box = createUI();
     document.body.prepend(box);
+    createMiniIndicator();
   }
 
   function renderResults(data) {
@@ -251,6 +270,7 @@
   <div style="display:flex;gap:8px;align-items:center">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="opacity:.9"><path d="M3 12a9 9 0 1 1 18 0 9 9 0 0 1-18 0z" stroke="#9be7ff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 12h8" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <strong>Discogs Analyzer</strong>
+    <div class="discogs-mini-badge" id="discogs-badge" aria-hidden="true">0%</div>
   </div>
   <div id="discogs-toggle" title="Toggle">▾</div>
 </div>
@@ -269,8 +289,47 @@
     if (toggleBtn) {
       toggleBtn.addEventListener("click", toggleUI);
     }
+    // ヘッダのバッジをクリックで復帰
+    box.querySelector("#discogs-badge")?.addEventListener("click", () => {
+      if (collapsed) toggleUI();
+    });
 
     return box;
+  }
+  function createMiniIndicator() {
+    if (document.getElementById("discogs-mini-indicator")) return;
+    const mini = document.createElement("div");
+    mini.id = "discogs-mini-indicator";
+    mini.innerHTML = `<div><strong id="discogs-mini-count">0/0</strong><small id="discogs-mini-label">Fetching</small></div>`;
+    mini.addEventListener("click", () => {
+      // クリックでメインUIを開く（存在しない場合は作る）
+      if (!document.getElementById("discogs-ui")) {
+        const box = createUI();
+        document.body.prepend(box);
+      }
+      const box = document.getElementById("discogs-ui");
+      if (box) {
+        box.style.display = "block";
+        // 折りたたまれてたら展開
+        if (collapsed) toggleUI();
+      }
+    });
+    document.body.appendChild(mini);
+  }
+
+  function updateMiniIndicator(done, total) {
+    const mini = document.getElementById("discogs-mini-indicator");
+    if (!mini) return;
+    const cnt = mini.querySelector("#discogs-mini-count");
+    const label = mini.querySelector("#discogs-mini-label");
+    cnt.innerText = `${done}/${total}`;
+    if (total > 0) {
+      if (done === total) label.innerText = "Done";
+      else label.innerText = "Fetching";
+    } else {
+      label.innerText = "Waiting";
+    }
+    mini.classList.remove("hidden");
   }
 
   function removeUI() {
@@ -279,26 +338,33 @@
   function toggleUI() {
     collapsed = !collapsed;
 
-    const list = document.querySelector("#discogs-list");
-    const progress = document.querySelector(".discogs-progress");
-    const status = document.querySelector("#discogs-status");
-    const btn = document.querySelector("#discogs-toggle");
+    const box = document.getElementById("discogs-ui");
+    if (!box) return;
+
+    const list = box.querySelector("#discogs-list");
+    const progress = box.querySelector(".discogs-progress");
+    const status = box.querySelector("#discogs-status");
+    const btn = box.querySelector("#discogs-toggle");
+    const badge = box.querySelector("#discogs-badge");
 
     if (collapsed) {
+      // メインの詳細は隠すがヘッダは残す。代わりにバッジを表示
       list.style.display = "none";
       progress.style.display = "none";
       status.style.display = "none";
+      if (badge) badge.style.display = "inline-block";
 
       btn.innerText = "▸";
     } else {
+      // 展開
       list.style.display = "block";
       progress.style.display = "block";
       status.style.display = "block";
+      if (badge) badge.style.display = "none";
 
       btn.innerText = "▾";
     }
   }
-
   function injectStyle() {
     if (document.getElementById("discogs-style")) return;
 
@@ -383,6 +449,41 @@
 /* Close ボタン */
 #discogs-close{cursor:pointer;color:#fff;padding:4px 8px;border-radius:6px;background:transparent}
 #discogs-close:hover{background:rgba(255,255,255,0.03)}
+
+/* ミニバッジ（ヘッダ内） */
+.discogs-mini-badge{
+  display:none;               /* 折りたたみ時に表示するので初期は非表示 */
+  min-width:40px;
+  padding:4px 8px;
+  border-radius:12px;
+  background:rgba(255,255,255,0.06);
+  font-size:12px;
+  text-align:center;
+  color:#bde8ff;
+  margin-left:8px;
+}
+
+/* 常駐ミニインジケーター（UIを完全に閉じても残す） */
+#discogs-mini-indicator{
+  position:fixed;
+  right:18px;
+  bottom:24px;
+  width:56px;
+  height:56px;
+  border-radius:50%;
+  background:linear-gradient(180deg,#0ea5a4,#2563eb);
+  color:#fff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+  z-index:1000000;
+  box-shadow:0 8px 20px rgba(0,0,0,.4);
+  cursor:pointer;
+  user-select:none;
+}
+#discogs-mini-indicator.hidden{ display:none; }
+#discogs-mini-indicator small{ display:block; font-size:10px; opacity:0.9; line-height:1; text-align:center; padding:2px; }
 `;
     document.head.appendChild(s);
   }

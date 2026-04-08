@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Price Helper Pro
 // @namespace    http://tampermonkey.net/
-// @version      2.2.0
+// @version      2.2.1
 // @description  Discogs price viewer (Mercari / Yahoo / eBay) — scrollable UI for large results
 // @match        https://jp.mercari.com/item/*
 // @match        *://auctions.yahoo.co.jp/jp/auction/*
@@ -15,8 +15,8 @@
 
   const CONFIG = {
     API_BASE: "http://204.168.135.35:3000",
-    API_BASE2: "https://204.168.135.35:3500",
-    APP_BASE: "https://204.168.135.35:4173",
+    API_BASE2: "http://204.168.135.35:3500",
+    APP_BASE: "http://204.168.135.35:4173",
     EMAIL: "ren@example.com",
     PASSWORD: "password123",
     GEMINI: "/api/v1/gemini",
@@ -145,17 +145,29 @@
         document
           .querySelector(".sc-1f0603b0-2")
           ?.innerText.replace(/[^0-9]/g, "") || "";
+      if (price == "") {
+        price =
+          document
+            .querySelector(".sc-707a05cc-3")
+            ?.innerText.replace(/[^0-9]/g, "") || "";
+      }
     }
     if (location.href.includes("ebay")) {
       desc =
         document.querySelector("#viTabs_0_is")?.innerText ||
         document.querySelector("#itemDescription")?.innerText ||
         "";
-      price =
-        document
-          .querySelector(".x-price-approx__price")
-          .querySelector("span")
-          ?.innerText.replace(/[^0-9]/g, "") || "";
+      price = document.querySelector(".x-price-approx__price");
+      if (price) {
+        price =
+          price.querySelector("span")?.innerText.replace(/[^0-9]/g, "") || "";
+      } else {
+        price =
+          document
+            .querySelector(".x-price-primary")
+            .querySelector("span")
+            ?.innerText.replace(/[^0-9]/g, "") || "";
+      }
     }
     return { title, description: desc, price };
   }

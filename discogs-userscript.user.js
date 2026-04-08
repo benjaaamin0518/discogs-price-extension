@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Price Helper Pro
 // @namespace    http://tampermonkey.net/
-// @version      2.1.2
+// @version      2.2.0
 // @description  Discogs price viewer (Mercari / Yahoo / eBay) — scrollable UI for large results
 // @match        https://jp.mercari.com/item/*
 // @match        *://auctions.yahoo.co.jp/jp/auction/*
@@ -15,16 +15,29 @@
 
   const CONFIG = {
     API_BASE: "http://204.168.135.35:3000",
+    API_BASE2: "https://204.168.135.35:3500",
+    APP_BASE: "https://204.168.135.35:4173",
+    EMAIL: "ren@example.com",
+    PASSWORD: "password123",
     GEMINI: "/api/v1/gemini",
     DISCOGS: "/api/v1/discogsData",
     JOB: "/api/scrape",
+    AUTH_ME: "/auth/me",
+    AUTH_LOGIN: "/auth/login",
+    AUTH_REFRESH: "/auth/refresh",
     ACCESS_TOKEN: "kX9%^mZ7GYd7dduV^m&t5wX9s8Z5n",
     POLL_INTERVAL: 2500,
   };
 
+  const AUTH_STORAGE_KEY = "digmap_auth_session";
+
   let running = false;
   let collapsed = false;
   let lastUrl = location.href;
+  let authChecked = false;
+  let isAuthenticated = false;
+  let latestReleases = [];
+  let page = null;
   const id = crypto.randomUUID();
   init();
   observeUrl();
@@ -34,6 +47,9 @@
       if (location.href !== lastUrl) {
         lastUrl = location.href;
         running = false;
+        authChecked = false;
+        isAuthenticated = false;
+        latestReleases = [];
         removeUI();
         init();
       }
@@ -47,16 +63,18 @@
 
     await waitTitle();
 
-    const page = extractPage();
-
+    page = extractPage();
     if (!page.title) return;
 
     running = true;
     showLoading();
 
     try {
+      await ensureAuthChecked();
+
       const meta = await gemini(page);
       const releases = await searchDiscogs(meta);
+      latestReleases = releases;
 
       if (!releases.length) {
         showError("Discogs候補なし");
@@ -111,17 +129,62 @@
   function extractPage() {
     const title = document.querySelector("h1")?.innerText || document.title;
     let desc = "";
-    if (location.href.includes("mercari"))
+    let price = "";
+    if (location.href.includes("mercari")) {
       desc =
         document.querySelector('[data-testid="description"]')?.innerText || "";
-    if (location.href.includes("yahoo"))
+      price =
+        document
+          .querySelector('[data-testid="price"]')
+          .querySelector("span:nth-of-type(2)")
+          ?.innerText.replace(/[^0-9]/g, "") || "";
+    }
+    if (location.href.includes("yahoo")) {
       desc = document.querySelector("#description")?.innerText || "";
-    if (location.href.includes("ebay"))
+      price =
+        document
+          .querySelector(".sc-1f0603b0-2")
+          ?.innerText.replace(/[^0-9]/g, "") || "";
+    }
+    if (location.href.includes("ebay")) {
       desc =
         document.querySelector("#viTabs_0_is")?.innerText ||
         document.querySelector("#itemDescription")?.innerText ||
         "";
-    return { title, description: desc };
+      price =
+        document
+          .querySelector(".x-price-approx__price")
+          .querySelector("span")
+          ?.innerText.replace(/[^0-9]/g, "") || "";
+    }
+    return { title, description: desc, price };
+  }
+
+  async function ensureAuthChecked() {
+    if (authChecked) return;
+    authChecked = true;
+    try {
+      let result = null;
+      if (!getStoredSession()) {
+        await login();
+      }
+      result = await apiRequest("GET", CONFIG.AUTH_ME);
+      if (result) {
+        isAuthenticated = true;
+      } else {
+        setStoredSession(null);
+        await login();
+        result = await apiRequest("GET", CONFIG.AUTH_ME);
+        if (!result) {
+          isAuthenticated = false;
+        } else {
+          isAuthenticated = true;
+        }
+      }
+    } catch (e) {
+      isAuthenticated = false;
+      console.warn("[auth/me] failed", e);
+    }
   }
 
   async function gemini(data) {
@@ -186,7 +249,6 @@
           clearInterval(t);
         }
       } catch (err) {
-        // ネットワーク等の一時エラーは無視して再試行
         console.warn("[pollJob] error", err);
       }
     }, CONFIG.POLL_INTERVAL);
@@ -194,7 +256,6 @@
 
   function updatePrices(job) {
     if (!job) return;
-    // alert(JSON.stringify(job));
     const total = job.penddingJobCount || 0;
     const done = job.successJobCount || 0;
 
@@ -204,30 +265,24 @@
     const status = document.querySelector("#discogs-status");
     if (status) status.innerText = `Fetching prices ${done}/${total}`;
 
-    // ヘッダのバッジを更新
     const badge = document.getElementById("discogs-badge");
     if (badge) {
       if (total > 0) {
         const pct = Math.round((done / total) * 100);
         badge.innerText = `${pct}%`;
-        // 折りたたまれた時に見えるように表示
         if (collapsed) badge.style.display = "inline-block";
       } else {
         badge.innerText = `0%`;
       }
     }
 
-    // 常駐ミニインジケーターを更新（存在すれば）
     updateMiniIndicator(done, total);
 
     if (total > 0 && done === total) {
       const statusDone = document.querySelector("#discogs-status");
       if (statusDone) statusDone.innerText = "Complete";
-      // mini も Done 表示にする（任意で非表示に）
       const mini = document.getElementById("discogs-mini-indicator");
       if (mini) mini.querySelector("#discogs-mini-label").innerText = "Done";
-      // 必要なら一定時間後に自動で消す処理も入れられます
-      // setTimeout(()=> mini?.remove(), 5000);
     }
   }
 
@@ -252,11 +307,33 @@
   <div class="discogs-price"><span>Lowest</span><span class="low">-</span></div>
   <div class="discogs-price"><span>Median</span><span class="med">-</span></div>
   <div class="discogs-price"><span>Highest</span><span class="high">-</span></div>
-  <a target="_blank" href="https://discogs.com/release/${r.id}" class="discogs-btn" style="color:#fff">Open Discogs</a>
+  <div class="discogs-actions">
+    <a target="_blank" rel="noreferrer noopener" href="https://discogs.com/release/${r.id}" class="discogs-btn discogs-btn-secondary" style="color:#fff">Open Discogs</a>
+    ${
+      isAuthenticated
+        ? `<button type="button" class="discogs-btn" data-release-id="${r.id}">Open Digmap</button>`
+        : ""
+    }
+  </div>
 </div>
 `,
       )
       .join("");
+
+    list.querySelectorAll("[data-release-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const releaseId = btn.getAttribute("data-release-id");
+        openDigmap(releaseId);
+      });
+    });
+  }
+
+  function openDigmap(releaseId) {
+    if (!releaseId) return;
+    const url = `${CONFIG.APP_BASE}/app/my-lists?releaseId=${encodeURIComponent(
+      releaseId,
+    )}&url=${location.href}&price=${encodeURIComponent(page.price)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   function createUI() {
@@ -289,20 +366,19 @@
     if (toggleBtn) {
       toggleBtn.addEventListener("click", toggleUI);
     }
-    // ヘッダのバッジをクリックで復帰
     box.querySelector("#discogs-badge")?.addEventListener("click", () => {
       if (collapsed) toggleUI();
     });
 
     return box;
   }
+
   function createMiniIndicator() {
     if (document.getElementById("discogs-mini-indicator")) return;
     const mini = document.createElement("div");
     mini.id = "discogs-mini-indicator";
     mini.innerHTML = `<div><strong id="discogs-mini-count">0/0</strong><small id="discogs-mini-label">Fetching</small></div>`;
     mini.addEventListener("click", () => {
-      // クリックでメインUIを開く（存在しない場合は作る）
       if (!document.getElementById("discogs-ui")) {
         const box = createUI();
         document.body.prepend(box);
@@ -310,7 +386,6 @@
       const box = document.getElementById("discogs-ui");
       if (box) {
         box.style.display = "block";
-        // 折りたたまれてたら展開
         if (collapsed) toggleUI();
       }
     });
@@ -348,7 +423,6 @@
     const badge = box.querySelector("#discogs-badge");
 
     if (collapsed) {
-      // メインの詳細は隠すがヘッダは残す。代わりにバッジを表示
       list.style.display = "none";
       progress.style.display = "none";
       status.style.display = "none";
@@ -356,7 +430,6 @@
 
       btn.innerText = "▸";
     } else {
-      // 展開
       list.style.display = "block";
       progress.style.display = "block";
       status.style.display = "block";
@@ -376,8 +449,8 @@
   top:80px;
   right:20px;
   width:360px;
-  max-height:70vh;         /* 全体の最大高さ */
-  overflow:hidden;         /* 内部要素でスクロールさせる */
+  max-height:70vh;
+  overflow:hidden;
   background:#111;
   color:#fff;
   padding:12px;
@@ -388,7 +461,6 @@
   box-sizing:border-box;
 }
 
-/* ヘッダ */
 .discogs-head{
   display:flex;
   justify-content:space-between;
@@ -399,14 +471,12 @@
   font-size:14px;
 }
 
-/* ステータス */
 #discogs-status{
   font-size:13px;
   color:#d1e9f6;
   margin-bottom:8px;
 }
 
-/* プログレスバー */
 .discogs-progress{
   height:8px;
   background:#222;
@@ -421,14 +491,12 @@
   transition:width .3s ease;
 }
 
-/* リスト部分をスクロール可能に */
 .discogs-list{
-  max-height: calc(70vh - 140px); /* ヘッダなどの高さを差し引いた領域を最大に */
+  max-height: calc(70vh - 140px);
   overflow:auto;
   padding-right:8px;
 }
 
-/* カード */
 .discogs-card{
   background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
   padding:10px;
@@ -439,20 +507,19 @@
 .discogs-title{font-size:13px;font-weight:700;margin-bottom:4px;}
 .discogs-meta{font-size:11px;color:#9aa3ad;margin-bottom:6px;}
 .discogs-price{display:flex;justify-content:space-between;font-size:12px;margin:2px 0;}
-.discogs-btn{display:inline-block;margin-top:6px;background:#2563eb;padding:6px 10px;border-radius:6px;text-decoration:none;font-size:12px;color:#fff;}
+.discogs-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;}
+.discogs-btn{display:inline-block;background:#2563eb;padding:6px 10px;border-radius:6px;text-decoration:none;font-size:12px;color:#fff;border:none;cursor:pointer;}
+.discogs-btn-secondary{background:#374151;}
 
-/* カスタムスクロール（軽め） */
 .discogs-list::-webkit-scrollbar{width:10px}
 .discogs-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:6px}
 .discogs-list::-webkit-scrollbar-track{background:transparent}
 
-/* Close ボタン */
 #discogs-close{cursor:pointer;color:#fff;padding:4px 8px;border-radius:6px;background:transparent}
 #discogs-close:hover{background:rgba(255,255,255,0.03)}
 
-/* ミニバッジ（ヘッダ内） */
 .discogs-mini-badge{
-  display:none;               /* 折りたたみ時に表示するので初期は非表示 */
+  display:none;
   min-width:40px;
   padding:4px 8px;
   border-radius:12px;
@@ -463,7 +530,6 @@
   margin-left:8px;
 }
 
-/* 常駐ミニインジケーター（UIを完全に閉じても残す） */
 #discogs-mini-indicator{
   position:fixed;
   right:18px;
@@ -520,13 +586,168 @@
     });
   }
 
+  function apiRequest(method, path, body, attemptRefresh = true) {
+    return new Promise(async (resolve, reject) => {
+      const session = getStoredSession();
+      const url = `${CONFIG.API_BASE2}${path}`;
+
+      const headers = {
+        "Content-Type": "application/json",
+      };
+
+      if (session?.accessToken) {
+        headers.authorization = `Bearer ${session.accessToken}`;
+      }
+
+      GM.xmlHttpRequest({
+        method,
+        url,
+        headers,
+        data: body ? JSON.stringify(body) : undefined,
+        withCredentials: true,
+
+        onload: async (res) => {
+          const status = res.status;
+
+          if (status >= 200 && status < 300) {
+            if (status === 204) return resolve(undefined);
+            try {
+              resolve(JSON.parse(res.responseText));
+            } catch {
+              resolve(res.responseText);
+            }
+            return;
+          }
+
+          // 401対応
+          const isAuthEndpoint = [
+            "/auth/login",
+            "/auth/register",
+            "/auth/refresh",
+          ].includes(path);
+
+          if (status === 401 && attemptRefresh && !isAuthEndpoint) {
+            const refreshed = await refreshAccessToken();
+            if (refreshed) {
+              resolve(apiRequest(method, path, body, false));
+              return;
+            }
+            setStoredSession(null);
+          }
+
+          try {
+            const errorData = JSON.parse(res.responseText);
+            reject(
+              new HttpClientError(
+                status,
+                res.statusText,
+                errorData.message || errorData.error,
+              ),
+            );
+          } catch {
+            reject(new Error(res.responseText));
+          }
+        },
+
+        onerror: (err) => reject(err),
+      });
+    });
+  }
+  function getStoredSession() {
+    let raw = null;
+    raw = window.localStorage.getItem("digmap_auth_session");
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  function setStoredSession(session) {
+    if (!session) {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  }
+
+  async function refreshAccessToken() {
+    const session = getStoredSession();
+    if (!session?.refreshToken) return false;
+
+    try {
+      const refreshed = await apiRequest(
+        "POST",
+        CONFIG.AUTH_REFRESH,
+        {
+          refreshToken: session.refreshToken,
+        },
+        false,
+      );
+
+      if (refreshed?.accessToken) {
+        setStoredSession({
+          accessToken: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken ?? session.refreshToken,
+          userId: refreshed.userId ?? session.userId,
+        });
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.warn("[auth/refresh] failed", e);
+      return false;
+    }
+  }
+  async function login() {
+    // const session = getStoredSession();
+    // if (session) return false;
+
+    try {
+      const refreshed = await apiRequest(
+        "POST",
+        CONFIG.AUTH_LOGIN,
+        {
+          email: CONFIG.EMAIL,
+          password: CONFIG.PASSWORD,
+        },
+        false,
+      );
+
+      if (refreshed?.accessToken) {
+        setStoredSession({
+          accessToken: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken ?? session.refreshToken,
+          userId: refreshed.userId ?? session.userId,
+        });
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.warn("[auth/login] failed", e);
+      return false;
+    }
+  }
+  class HttpClientError extends Error {
+    constructor(status, statusText, message) {
+      super(message || statusText || "Request failed");
+      this.name = "HttpClientError";
+      this.status = status;
+      this.statusText = statusText;
+    }
+  }
+
   function escapeHtml(str) {
     if (!str) return "";
     return String(str)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
+      .replace(/\"/g, "&quot;")
       .replace(/'/g, "&#039;");
   }
 })();

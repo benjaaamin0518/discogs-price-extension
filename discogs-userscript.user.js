@@ -607,7 +607,7 @@
         "Content-Type": "application/json",
       };
 
-      if (session?.accessToken) {
+      if (session?.accessToken && !path.includes(CONFIG.AUTH_REFRESH)) {
         headers.authorization = `Bearer ${session.accessToken}`;
       }
 

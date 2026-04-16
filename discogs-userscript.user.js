@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Price Helper Pro
 // @namespace    http://tampermonkey.net/
-// @version      2.2.2
+// @version      2.2.3
 // @description  Discogs price viewer (Mercari / Yahoo / eBay) — scrollable UI for large results
 // @match        https://jp.mercari.com/item/*
 // @match        *://auctions.yahoo.co.jp/jp/auction/*
@@ -17,7 +17,7 @@
     API_BASE: "http://204.168.135.35:3000",
     API_BASE2: "http://204.168.135.35:3500",
     APP_BASE: "http://204.168.135.35:4173",
-    EMAIL: "ren@example.com",
+    EMAIL: "test@example.com",
     PASSWORD: "password123",
     GEMINI: "/api/v1/gemini",
     DISCOGS: "/api/v1/discogsData",
@@ -50,7 +50,7 @@
         authChecked = false;
         isAuthenticated = false;
         latestReleases = [];
-        removeUI();
+        location.reload();
         init();
       }
     });
@@ -58,13 +58,16 @@
   }
 
   async function init() {
+    // alert("1");
     if (running) return;
     if (!isTargetPage()) return;
+    // alert("2");
 
     await waitTitle();
 
     page = extractPage();
     if (!page.title) return;
+    // alert("3");
 
     running = true;
     showLoading();

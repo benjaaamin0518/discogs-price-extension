@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      2.2.3
 // @description  Discogs price viewer (Mercari / Yahoo / eBay) — scrollable UI for large results
-// @match        https://jp.mercari.com/item/*
+// @match        https://jp.mercari.com/*
 // @match        *://auctions.yahoo.co.jp/jp/auction/*
 // @match        *://www.ebay.com/itm/*
 // @grant        GM.xmlHttpRequest
@@ -50,7 +50,10 @@
         authChecked = false;
         isAuthenticated = false;
         latestReleases = [];
-        location.reload();
+        removeUI();
+        if (isTargetPage()) {
+          location.reload();
+        }
         init();
       }
     });

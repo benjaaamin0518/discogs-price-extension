@@ -115,7 +115,7 @@ iPhoneのホーム画面から
 以下の手順で CDN から直接 Userscript を追加します。
 
 1. 本リポジトリの CDN URL をコピーします。
-   https://cdn.jsdelivr.net/gh/benjaaamin0518/discogs-price-extension@2.2.4/discogs-userscript.user.js
+   https://cdn.jsdelivr.net/gh/benjaaamin0518/discogs-price-extension@2.2.5/discogs-userscript.user.js
 
 2. Safariで上記のURLを開き、Safariの「パズルアイコン」を押下
 <p align="center">

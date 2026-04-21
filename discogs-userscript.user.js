@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Price Helper Pro
 // @namespace    http://tampermonkey.net/
-// @version      2.2.3
+// @version      2.2.5
 // @description  Discogs price viewer (Mercari / Yahoo / eBay) — scrollable UI for large results
 // @match        https://jp.mercari.com/*
 // @match        *://auctions.yahoo.co.jp/jp/auction/*
@@ -138,7 +138,7 @@
     let price = "";
     if (location.href.includes("mercari")) {
       desc =
-        document.querySelector('[data-testid="description"]')?.innerText || "";
+        document.querySelector('[data-testid="description"]')?.innerHTML || "";
       price =
         document
           .querySelector('[data-testid="price"]')
@@ -146,7 +146,8 @@
           ?.innerText.replace(/[^0-9]/g, "") || "";
     }
     if (location.href.includes("yahoo")) {
-      desc = document.querySelector("#description")?.innerText || "";
+      desc = document.querySelector("#description")?.innerHTML || "";
+
       price =
         document
           .querySelector(".sc-1f0603b0-2")
@@ -160,9 +161,10 @@
     }
     if (location.href.includes("ebay")) {
       desc =
-        document.querySelector("#viTabs_0_is")?.innerText ||
-        document.querySelector("#itemDescription")?.innerText ||
+        document.querySelector("#viTabs_0_is")?.innerHTML ||
+        document.querySelector("#itemDescription")?.innerHTML ||
         "";
+
       price = document.querySelector(".x-price-approx__price");
       if (price) {
         price =
